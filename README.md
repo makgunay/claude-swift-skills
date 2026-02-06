@@ -4,6 +4,45 @@
 
 > **What are skills?** Structured knowledge files Claude reads before responding. They encode constraints, patterns, decision trees, and gotchas — turning Claude from "knows the syntax" into "knows how to ship."
 
+## How It Works
+
+Claude's training data includes Swift and Apple frameworks, but it's a snapshot — it doesn't know about WWDC 2025 APIs, has stale patterns, and misses platform-specific gotchas. Skills fix this by injecting current, structured knowledge at the moment Claude needs it.
+
+**The mechanics:**
+
+1. **You ask Claude something** — *"Build me a macOS menu bar app with a global hotkey"*
+
+2. **Claude scans available skills** — it reads the `description` field in each skill's YAML frontmatter (a one-paragraph summary packed with trigger phrases and API names) and decides which skills are relevant
+
+3. **Claude reads the matching `SKILL.md` files** — typically 2-4 skills per request, not all 22. For the example above, it would read `macos-app-structure`, `appkit-bridge`, `global-hotkeys`, and `liquid-glass`
+
+4. **Claude responds with skill-informed knowledge** — it now knows that `NSEvent.addGlobalMonitorForEvents` doesn't fire when your own app is focused (you need a local monitor too), that `NSPanel` needs `.nonactivating` style mask for floating windows, and that Liquid Glass requires `GlassEffectContainer` when you have multiple glass views
+
+**What skills contain:**
+
+Each `SKILL.md` follows a consistent structure designed for how LLMs process information:
+
+- **Critical Constraints** come first — the ❌ DO NOT / ✅ DO rules that prevent the most common mistakes. Claude is good at generating plausible code; it's bad at remembering edge cases. Constraints fix this.
+- **Decision Trees** help Claude choose the right approach — "Need system-wide hotkey that works even when app isn't focused? → Carbon `RegisterEventHotKey`. Need in-app shortcuts? → SwiftUI `.onKeyPress`." This prevents Claude from defaulting to whatever pattern it saw most during training.
+- **Code Patterns** are complete, tested implementations — not snippets. They include error handling, edge cases, and the surrounding context that Claude usually gets wrong.
+- **Reference files** (in `references/` subdirectories) contain deeper material that Claude reads when it needs more detail on a specific subtopic.
+
+**Token overhead:**
+
+Skills cost context window space. Here's what typical usage looks like:
+
+| Scenario | Skills loaded | Tokens used | % of 200K context |
+|---|---|---|---|
+| Quick question | 1-2 | ~3-5K | 1-2% |
+| Build a feature | 3-5 | ~10-15K | 5-7% |
+| Full app from scratch | 7-10 | ~20-30K | 10-15% |
+
+The modular design is intentional — each skill is self-contained so Claude only loads what's relevant, leaving the vast majority of context for your actual conversation.
+
+**Why not just put this in a system prompt?**
+
+You could paste skill content into a system prompt, but skills-as-files have advantages: they're versioned in git, modular (use only what you need), updatable (swap in new WWDC content without touching your prompt), and shareable. The `skill-maintainer` meta-skill can even ingest new Apple documentation and update existing skills automatically.
+
 ## Installation
 
 ### Claude.ai Projects
@@ -14,7 +53,7 @@
 ### Claude Code
 ```bash
 # Clone into your skills directory
-git clone https://github.com/yourname/claude-swift-skills.git /path/to/skills/user/claude-swift-skills
+git clone https://github.com/makgunay/claude-swift-skills.git /path/to/skills/user/claude-swift-skills
 
 # Or symlink individual skills
 ln -s /path/to/claude-swift-skills/liquid-glass ~/.claude/skills/liquid-glass
@@ -165,31 +204,11 @@ Reference skill files in your system prompt or include their content directly. E
 
 ---
 
-## Skill Anatomy
+## Platform Assumptions
 
-```
-skill-name/
-├── SKILL.md              # Main file — Claude reads this first
-│   ├── YAML frontmatter  # name + description (trigger matching)
-│   ├── Critical Constraints  # ❌ / ✅ patterns (read first)
-│   ├── Quick Reference   # Most-used code patterns
-│   └── Decision Trees    # When to use what
-└── references/           # Optional deep-dive documents
-    ├── topic-a.md
-    └── topic-b.md
-```
+**Swift 6.2 baseline.** Default MainActor isolation is a paradigm shift — async functions stay on the caller's actor unless explicitly marked `@concurrent`. The `swift-lang` skill covers this in depth.
 
-The `description` in YAML frontmatter is how Claude decides whether to read a skill. It's written like a search index — packed with trigger phrases, API names, and use cases.
-
-## Design Principles
-
-**Constraints over examples.** Every skill leads with "Critical Constraints" — things that will break your code. Examples follow. Claude generates decent code by default; it needs help remembering the gotchas.
-
-**Decision trees over opinions.** Need a floating panel? → NSPanel. Menu bar popover? → NSPopover. Standard window? → SwiftUI only. Skills match the right tool to the requirement rather than prescribing one approach.
-
-**Swift 6.2 baseline.** Default MainActor isolation is a paradigm shift. Async functions stay on the caller's actor unless explicitly marked `@concurrent`. The `swift-lang` skill covers this in depth.
-
-**macOS 26+ primary target.** Liquid Glass, native WebView, FoundationModels all require macOS 26 (Tahoe). Skills note OS availability where relevant; `tech-stack-validator` catches version mismatches automatically.
+**macOS 26+ primary target.** Liquid Glass, native WebView, and FoundationModels all require macOS 26 (Tahoe). Skills note OS availability where relevant; `tech-stack-validator` catches version mismatches automatically.
 
 ## Keeping Skills Current
 
